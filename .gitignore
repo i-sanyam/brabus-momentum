@@ -29,6 +29,8 @@ release/
 Thumbs.db
 
 .env
+prod.env
+
 brabus-momentum
 
 .netlify
