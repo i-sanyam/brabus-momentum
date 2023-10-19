@@ -29,6 +29,7 @@ release/
 Thumbs.db
 
 .env
+prod.env
 brabus-momentum
 
 # Local Netlify folder
