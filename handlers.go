@@ -3,14 +3,13 @@
 package main
 
 import (
-	"strings"
-	"io"
 	"context"
 	"encoding/json"
+	//"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"time"
-	"fmt"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -18,6 +17,12 @@ import (
 type SmallcaseCurl struct {
 	SmallCaseId   string `bson:"smallcase_id,omitempty" json:"smallcase_id,omitempty"`
 	EncryptedCurl string `bson:"encrypted_curl,omitempty"`
+}
+
+type SmallcaseAPIResponse struct {
+	Data struct {
+		Constituents []interface{} `json:"constituents"`
+	} `json:"data"`
 }
 
 func getConstituents(w http.ResponseWriter, r *http.Request) {
@@ -34,29 +39,27 @@ func getConstituents(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Error decrypting text "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	//fmt.Println(curl)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	cmd := exec.Command("curl", curl)
-	fmt.Println(curl)
+	cmd := exec.Command("bash", "-c", curl)
+
 	output, err := cmd.Output()
 	if err != nil {
-		http.Error(w, "Error fetching constituents " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error fetching constituents "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	var data map[string]interface{}
-	err = json.Unmarshal(output, &data)
+	var response SmallcaseAPIResponse
+	err = json.Unmarshal(output, &response)
 	if err != nil {
-		http.Error(w, "Error decoding constituents JSON " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error decoding response JSON "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	//fmt.Println(response)
 
-	constituents, ok := data["constituents"].([]interface{})
-	if !ok {
-		http.Error(w, "Error extracting constituents", http.StatusInternalServerError)
-		return
-	}
+	constituents := response.Data.Constituents
 
 	json.NewEncoder(w).Encode(constituents)
 }
@@ -68,12 +71,7 @@ func setConstituents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Convert body to string and remove "curl" prefix
-	command := strings.TrimPrefix(string(body), "curl ")
-
-	// Encrypt text
-	encryptedText, err := EncryptText(command)
-	//encryptedText, err := EncryptText(string(body))
+	encryptedText, err := EncryptText(string(body))
 	if err != nil {
 		http.Error(w, "Error encrypting text "+err.Error(), http.StatusInternalServerError)
 		return
