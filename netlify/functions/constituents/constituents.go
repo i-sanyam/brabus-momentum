@@ -30,12 +30,37 @@ type SmallcaseAPIResponse struct {
 	} `json:"data"`
 }
 
+type FilteredConstituent struct {
+	NseTicker string  `json:"nseTicker"`
+	Weight    float64 `json:"weight"`
+}
+
 var collection *mongo.Collection
 
 func init() {
 	// Load ENV variables
 	godotenv.Load()
 	collection = utils.GetMongoCollection()
+}
+
+func getMappedConstituents(constituents []interface{}) []FilteredConstituent {
+	var filteredConstituents []FilteredConstituent
+
+	// Iterate through the response and extract the required fields
+	for _, constituent := range constituents {
+		if constituentMap, ok := constituent.(map[string]interface{}); ok {
+			weight, _ := constituentMap["weight"].(float64)
+			if sidInfo, sidInfoExists := constituentMap["sidInfo"].(map[string]interface{}); sidInfoExists {
+				nseTicker, _ := sidInfo["nseTicker"].(string)
+				filteredConstituent := FilteredConstituent{
+					NseTicker: nseTicker,
+					Weight:    weight,
+				}
+				filteredConstituents = append(filteredConstituents, filteredConstituent)
+			}
+		}
+	}
+	return filteredConstituents
 }
 
 func getConstituents(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -64,9 +89,7 @@ func getConstituents(ctx context.Context, request events.APIGatewayProxyRequest)
 		return events.APIGatewayProxyResponse{Body: "Error decoding response JSON " + err.Error(), StatusCode: 500}, nil
 	}
 
-	constituents := response.Data.Constituents
-
-	body, err := json.Marshal(constituents)
+	body, err := json.Marshal(getMappedConstituents(response.Data.Constituents))
 	if err != nil {
 		return events.APIGatewayProxyResponse{Body: "Error encoding response JSON " + err.Error(), StatusCode: 500}, nil
 	}
