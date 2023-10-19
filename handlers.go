@@ -3,11 +3,14 @@
 package main
 
 import (
+	"strings"
+	"io"
 	"context"
 	"encoding/json"
 	"net/http"
 	"os/exec"
 	"time"
+	"fmt"
 
 	"go.mongodb.org/mongo-driver/bson"
 )
@@ -35,16 +38,17 @@ func getConstituents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 
 	cmd := exec.Command("curl", curl)
+	fmt.Println(curl)
 	output, err := cmd.Output()
 	if err != nil {
-		http.Error(w, "Error fetching constituents "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error fetching constituents " + err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	var data map[string]interface{}
 	err = json.Unmarshal(output, &data)
 	if err != nil {
-		http.Error(w, "Error decoding constituents JSON "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error decoding constituents JSON " + err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -58,18 +62,18 @@ func getConstituents(w http.ResponseWriter, r *http.Request) {
 }
 
 func setConstituents(w http.ResponseWriter, r *http.Request) {
-	// Get request body
-	var requestBody struct {
-		Curl string `json:"curl"`
-	}
-	err := json.NewDecoder(r.Body).Decode(&requestBody)
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Error decoding request body", http.StatusBadRequest)
+		http.Error(w, "Error reading request body "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
+	// Convert body to string and remove "curl" prefix
+	command := strings.TrimPrefix(string(body), "curl ")
+
 	// Encrypt text
-	encryptedText, err := EncryptText(requestBody.Curl)
+	encryptedText, err := EncryptText(command)
+	//encryptedText, err := EncryptText(string(body))
 	if err != nil {
 		http.Error(w, "Error encrypting text "+err.Error(), http.StatusInternalServerError)
 		return
@@ -89,7 +93,6 @@ func setConstituents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return success message
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("Curl updated successfully"))
+	// shortcircuit to return API response
+	getConstituents(w, r)
 }
