@@ -12,5 +12,5 @@ func GenerateKey() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(base64.URLEncoding.EncodeToString(key))
+	fmt.Println(base64.StdEncoding.EncodeToString(key))
 }
