@@ -16,7 +16,8 @@ release/
 *.prof
 *.cover
 *.out
-*.sum
+#*.mod
+#*.sum
 
 # IDEs and Editors
 .idea
