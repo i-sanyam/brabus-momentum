@@ -5,7 +5,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os/exec"
 	"time"
@@ -19,9 +18,6 @@ type SmallcaseCurl struct {
 }
 
 func getConstituents(w http.ResponseWriter, r *http.Request) {
-	// Get query parameters
-
-	// Find person in database
 	var curlDetails SmallcaseCurl
 	filter := bson.M{"smallcase_id": "CMMO_0001"}
 	err := collection.FindOne(context.Background(), filter).Decode(&curlDetails)
@@ -30,24 +26,35 @@ func getConstituents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return person as JSON
 	curl, err := DecryptText(curlDetails.EncryptedCurl)
 	if err != nil {
-		http.Error(w, "Error decrypting text " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error decrypting text "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 
-	cmd := exec.Command(curl)
+	cmd := exec.Command("curl", curl)
 	output, err := cmd.Output()
 	if err != nil {
-		http.Error(w, "Error fetching constituents " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error fetching constituents "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	fmt.Println(output)
 
-	json.NewEncoder(w).Encode(curl)
+	var data map[string]interface{}
+	err = json.Unmarshal(output, &data)
+	if err != nil {
+		http.Error(w, "Error decoding constituents JSON "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	constituents, ok := data["constituents"].([]interface{})
+	if !ok {
+		http.Error(w, "Error extracting constituents", http.StatusInternalServerError)
+		return
+	}
+
+	json.NewEncoder(w).Encode(constituents)
 }
 
 func setConstituents(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +71,7 @@ func setConstituents(w http.ResponseWriter, r *http.Request) {
 	// Encrypt text
 	encryptedText, err := EncryptText(requestBody.Curl)
 	if err != nil {
-		http.Error(w, "Error encrypting text " + err.Error(), http.StatusInternalServerError)
+		http.Error(w, "Error encrypting text "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
