@@ -30,3 +30,6 @@ Thumbs.db
 
 .env
 brabus-momentum
+
+# Local Netlify folder
+.netlify
