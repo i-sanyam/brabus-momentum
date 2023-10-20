@@ -5,6 +5,8 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"os"
 	"os/exec"
 	"time"
 
@@ -20,8 +22,10 @@ import (
 )
 
 type SmallcaseCurl struct {
-	SmallCaseId   string `bson:"smallcase_id,omitempty" json:"smallcase_id,omitempty"`
-	EncryptedCurl string `bson:"encrypted_curl,omitempty"`
+	SmallCaseId          string    `bson:"smallcase_id,omitempty" json:"smallcase_id,omitempty"`
+	EncryptedCurl        string    `bson:"encrypted_curl,omitempty"`
+	CachedResults        string    `bson:"cached_results,omitempty"`
+	ResultsLastFetchedAt time.Time `bson:"results_last_fetched_at,omitempty"`
 }
 
 type SmallcaseAPIResponse struct {
@@ -63,38 +67,70 @@ func getMappedConstituents(constituents []interface{}) []FilteredConstituent {
 	return filteredConstituents
 }
 
-func getConstituents(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
-	var curlDetails SmallcaseCurl
-	filter := bson.M{"smallcase_id": "CMMO_0001"}
-	err := collection.FindOne(context.Background(), filter).Decode(&curlDetails)
+func getConstituentsFromAPI(encryptedCurl string) (string, error) {
+	curl, err := utils.DecryptText(encryptedCurl)
 	if err != nil {
-		return events.APIGatewayProxyResponse{Body: "Smallcase not found", StatusCode: 404}, nil
-	}
-
-	curl, err := utils.DecryptText(curlDetails.EncryptedCurl)
-	if err != nil {
-		return events.APIGatewayProxyResponse{Body: "Error decrypting text " + err.Error(), StatusCode: 500}, nil
+		return "", errors.New("Error decrypting text " + err.Error())
 	}
 
 	cmd := exec.Command("bash", "-c", curl)
 
 	output, err := cmd.Output()
 	if err != nil {
-		return events.APIGatewayProxyResponse{Body: "Error fetching constituents " + err.Error(), StatusCode: 500}, nil
+		return "", errors.New("Error fetching constituents " + err.Error())
 	}
 
 	var response SmallcaseAPIResponse
 	err = json.Unmarshal(output, &response)
 	if err != nil {
-		return events.APIGatewayProxyResponse{Body: "Error decoding response JSON " + err.Error(), StatusCode: 500}, nil
+		return "", errors.New("Error decoding response JSON " + err.Error())
 	}
 
 	body, err := json.Marshal(getMappedConstituents(response.Data.Constituents))
 	if err != nil {
-		return events.APIGatewayProxyResponse{Body: "Error encoding response JSON " + err.Error(), StatusCode: 500}, nil
+		return "", errors.New("Error encoding response JSON " + err.Error())
+	}
+	return string(body), nil
+}
+
+func getConstituents(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+	var curlDetails SmallcaseCurl
+	filter := bson.M{"smallcase_id": os.Getenv("SMALLCASE_ID")}
+	err := collection.FindOne(context.Background(), filter).Decode(&curlDetails)
+	if err != nil {
+		return events.APIGatewayProxyResponse{Body: "Smallcase not found", StatusCode: 404}, nil
 	}
 
-	return events.APIGatewayProxyResponse{Body: string(body), StatusCode: 200}, nil
+	if time.Since(curlDetails.ResultsLastFetchedAt).Minutes() < 360 { // dont call curl again if time is less than 6 hours
+		return events.APIGatewayProxyResponse{
+			Body:       curlDetails.CachedResults,
+			StatusCode: 200,
+			Headers:    map[string]string{"Content-Type": "application/json", "X-Brabus-Cached": "true"},
+		}, nil
+	}
+
+	body, err := getConstituentsFromAPI(curlDetails.EncryptedCurl)
+	if err != nil {
+		return events.APIGatewayProxyResponse{Body: "Error: " + err.Error(), StatusCode: 500}, nil
+	}
+
+	// Update database
+	update := bson.M{
+		"$set": bson.M{
+			"cached_results":          body,
+			"results_last_fetched_at": time.Now(),
+		},
+	}
+	_, err = collection.UpdateOne(context.Background(), filter, update)
+	if err != nil {
+		return events.APIGatewayProxyResponse{Body: "Error updating database", StatusCode: 500}, nil
+	}
+
+	return events.APIGatewayProxyResponse{
+		Body:       body,
+		StatusCode: 200,
+		Headers:    map[string]string{"Content-Type": "application/json", "X-Brabus-Cached": "false"},
+	}, nil
 }
 
 func setConstituents(ctx context.Context, request events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -106,11 +142,12 @@ func setConstituents(ctx context.Context, request events.APIGatewayProxyRequest)
 	}
 
 	// Update database
-	filter := bson.M{"smallcase_id": "CMMO_0001"}
+	filter := bson.M{"smallcase_id": os.Getenv("SMALLCASE_ID")}
 	update := bson.M{
 		"$set": bson.M{
-			"encrypted_curl": encryptedText,
-			"updated_at":     time.Now(),
+			"encrypted_curl":          encryptedText,
+			"updated_at":              time.Now(),
+			"results_last_fetched_at": nil,
 		},
 	}
 	_, err = collection.UpdateOne(context.Background(), filter, update)
